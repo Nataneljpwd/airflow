@@ -749,9 +749,17 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                             dag_id,
                             task_instance,
                         )
+                        # set the tasks as failed only after a period of time AFTER the dag was deleted.
                         session.execute(
                             update(TI)
-                            .where(TI.dag_id == dag_id, TI.state == TaskInstanceState.SCHEDULED)
+                            .where(
+                                TI.dag_id == dag_id,
+                                TI.state == TaskInstanceState.SCHEDULED,
+                                DagModel.is_stale,
+                                DagModel.updated_at
+                                >= datetime.now()
+                                - timedelta(seconds=int(conf["core"]["task_serialized_dag_deleted_grace"])),
+                            )
                             .values(state=TaskInstanceState.FAILED)
                             .execution_options(synchronize_session="fetch")
                         )
@@ -794,7 +802,11 @@ class SchedulerJobRunner(BaseJobRunner, LoggingMixin):
                                 task_instance,
                             )
                             starved_tasks_task_dagrun_concurrency.add(
-                                (task_instance.dag_id, task_instance.run_id, task_instance.task_id)
+                                (
+                                    task_instance.dag_id,
+                                    task_instance.run_id,
+                                    task_instance.task_id,
+                                )
                             )
                             continue
 

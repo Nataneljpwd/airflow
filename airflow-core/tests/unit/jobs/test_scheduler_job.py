@@ -763,6 +763,34 @@ class TestSchedulerJob:
         assert len(callback_request.context_from_server.dag_run.consumed_asset_events) == 1
         assert callback_request.context_from_server.dag_run.consumed_asset_events[0].asset.uri == asset1.uri
 
+    def test_missing_serialized_dag_bulk_fails(self, dag_maker, session):
+        dag_id = "SchedulerJobTest.test_missing_serialized_dag_bulk_fails"
+
+        with dag_maker(dag_id=dag_id, session=session):
+            EmptyOperator(task_id="task_a")
+            EmptyOperator(task_id="task_b")
+
+        scheduler_job = Job()
+        self.job_runner = SchedulerJobRunner(job=scheduler_job)
+
+        # Simulate serialized DAG being transiently missing
+        self.job_runner.scheduler_dag_bag = mock.MagicMock()
+        self.job_runner.scheduler_dag_bag.get_dag_for_run.return_value = None
+
+        dr = dag_maker.create_dagrun(state=DagRunState.RUNNING, run_type=DagRunType.SCHEDULED)
+        for ti in dr.task_instances:
+            ti.state = State.SCHEDULED
+            session.merge(ti)
+        session.flush()
+
+        res = self.job_runner._executable_task_instances_to_queued(max_tis=32, session=session)
+        session.flush()
+
+        assert len(res) == 0
+        tis = dr.get_task_instances(session=session)  # Both tasks are FAILED instead of SCHEDULED
+        for ti in tis:
+            print(f"{ti.task_id}: {ti.state}")
+
     @pytest.mark.usefixtures("testing_dag_bundle")
     def test_schedule_dag_run_with_asset_event(self, session: Session, dag_maker: DagMaker):
         """
