@@ -30,7 +30,12 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from airflow.providers.common.compat.sdk import AirflowException, BaseHook, conf as airflow_conf
+from airflow.providers.common.compat.sdk import (
+    AirflowConfigException,
+    AirflowException,
+    BaseHook,
+    conf as airflow_conf,
+)
 from airflow.security.kerberos import renew_from_kt
 from airflow.utils.log.logging_mixin import LoggingMixin
 
@@ -392,7 +397,12 @@ class SparkSubmitHook(BaseHook, LoggingMixin):
         connection_cmd += ["--master", self._connection["master"]]
 
         for key in self._conf:
-            connection_cmd += ["--conf", f"{key}={self._conf[key]}"]
+            expected_config_types = ["int", "float", "bool", "str"]
+            if type(self._conf[key]) not in expected_config_types:
+                raise AirflowConfigException(
+                    f"Expected config of type {expected_config_types}, got {type(self._conf[key])} instead"
+                )
+            connection_cmd += ["--conf", f"{key}={str(self._conf[key])}"]
         if self._env_vars and (self._is_kubernetes or self._is_yarn):
             if self._is_yarn:
                 tmpl = "spark.yarn.appMasterEnv.{}={}"
