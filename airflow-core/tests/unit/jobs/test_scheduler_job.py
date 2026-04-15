@@ -3354,7 +3354,7 @@ class TestSchedulerJob:
         dag_run = dag_maker.create_dagrun(state=State.RUNNING, session=session, run_type=DagRunType.SCHEDULED)
 
         for _ in range(5):
-            # create a bunch of dagruns in queued state, to make sure they are filtered by max_active_runs
+            # create a bunch of dagruns in running state, to exceed max_active_runs
             dag_run = dag_maker.create_dagrun_after(
                 dag_run, run_type=DagRunType.SCHEDULED, state=State.RUNNING
             )
@@ -5985,11 +5985,11 @@ class TestSchedulerJob:
 
         # after running the scheduler one time, observe that only one dag run is started
         # and 3 backfill dagruns are started
-        # this is because there are 30 dags, most of which get filtered due to max_active_runs
-        # and so due to the default dagruns to examine, we look at the first 20 dags which CAN be run
-        # according to the max_active_runs parameter, meaning 3 backfill runs will start, 1 non backfill and
-        # all dagruns of dag2
-        # any runs for dag2 get started
+        # this is because there are 30 queued dagruns, many of which get filtered because their DAGs
+        # have already reached max_active_runs
+        # and so due to the default dagruns-to-examine limit, we look at the first 20 dagruns that CAN be run
+        # according to the max_active_runs parameter, meaning 3 backfill runs will start, 1 non-backfill,
+        # and all runnable dagruns for dag2
         assert DagRun.DEFAULT_DAGRUNS_TO_EXAMINE == 20
         dag1_non_b_running, dag1_b_running, total_running = _running_counts()
         assert dag1_non_b_running == 1
