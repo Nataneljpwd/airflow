@@ -5997,13 +5997,12 @@ class TestSchedulerJob:
         assert total_running == 20
         assert session.scalar(select(func.count()).select_from(DagRun)) == 66
         assert session.scalar(select(func.count()).where(DagRun.dag_id == dag1_dag_id)) == 36
-        # now we finish all lower priority backfill tasks, and observe new higher priority tasks are started
+        # now we finish all test_dag2 tasks, and observe new higher priority tasks are started
         session.execute(
             update(DagRun)
             .where(DagRun.dag_id == "test_dag2", DagRun.state == DagRunState.RUNNING)
             .values(state=DagRunState.SUCCESS)
         )
-        session.commit()
         session.flush()
 
         # we run scheduler again and observe that now all the runs are created

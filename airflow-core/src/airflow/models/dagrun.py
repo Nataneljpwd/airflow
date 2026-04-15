@@ -683,9 +683,29 @@ class DagRun(Base, LoggingMixin):
             select(
                 DagRun.dag_id,
                 DagRun.id,
+                BackfillDagRun.sort_ordinal,
                 func.row_number()
-                .over(partition_by=[DagRun.dag_id, DagRun.backfill_id], order_by=DagRun.logical_date)
+                .over(
+                    partition_by=[DagRun.dag_id, DagRun.backfill_id],
+                    order_by=[BackfillDagRun.sort_ordinal, DagRun.run_after, DagRun.dag_id],
+                )
                 .label("rn"),
+            )
+            .join(
+                DagModel,
+                and_(
+                    DagModel.dag_id == DagRun.dag_id,
+                    DagModel.is_paused == false(),
+                    DagModel.is_stale == false(),
+                ),
+            )
+            .join(
+                BackfillDagRun,
+                and_(
+                    BackfillDagRun.backfill_id == DagRun.backfill_id,
+                    BackfillDagRun.dag_run_id == DagRun.id,
+                ),
+                isouter=True,
             )
             .where(DagRun.state == DagRunState.QUEUED)
             .subquery()
@@ -699,22 +719,6 @@ class DagRun(Base, LoggingMixin):
                     available_dagruns_rn.c.id == DagRun.id,
                     available_dagruns_rn.c.dag_id == DagRun.dag_id,
                 ),
-            )
-            .join(
-                DagModel,
-                and_(
-                    DagModel.dag_id == cls.dag_id,
-                    DagModel.is_paused == false(),
-                    DagModel.is_stale == false(),
-                ),
-            )
-            .join(
-                BackfillDagRun,
-                and_(
-                    BackfillDagRun.dag_run_id == DagRun.id,
-                    BackfillDagRun.backfill_id == DagRun.backfill_id,
-                ),
-                isouter=True,
             )
             .join(Backfill, isouter=True)
             .join(
@@ -746,7 +750,7 @@ class DagRun(Base, LoggingMixin):
                 # additionally, sorting by sort_ordinal ensures that the backfill
                 # dag runs are created in the right order when that matters.
                 # todo: AIP-78 use row_number to avoid starvation; limit the number of returned runs per-dag
-                nulls_first(cast("ColumnElement[Any]", BackfillDagRun.sort_ordinal), session=session),
+                nulls_first(cast("ColumnElement[Any]", available_dagruns_rn.c.sort_ordinal), session=session),
                 nulls_first(cast("ColumnElement[Any]", cls.last_scheduling_decision), session=session),
                 nulls_first(running_drs.c.num_running, session=session),  # many running -> lower priority
                 cls.run_after,
