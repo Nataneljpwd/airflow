@@ -27,9 +27,9 @@ from fastapi import FastAPI
 from fastapi.routing import Mount
 
 from airflow.api_fastapi.common.dagbag import create_dag_bag
+from airflow.api_fastapi.common.exceptions import init_error_handlers
 from airflow.api_fastapi.core_api.app import (
     init_config,
-    init_error_handlers,
     init_flask_plugins,
     init_middlewares,
     init_views,
@@ -61,7 +61,7 @@ def get_cookie_path() -> str:
 
 
 # Fast API apps mounted under these prefixes are not allowed
-RESERVED_URL_PREFIXES = ["/api/v2", "/ui", "/execution"]
+RESERVED_URL_PREFIXES = ["/api/v2", "/ui", "/execution", "/auth", "/pluginsv2"]
 
 log = logging.getLogger(__name__)
 
@@ -71,8 +71,32 @@ class _AuthManagerState:
     _lock = threading.Lock()
 
 
+def _initialize_api_server_stats() -> None:
+    """
+    Initialize the ``Stats`` singleton in the API server process.
+
+    Initialization is guarded so a metrics misconfiguration can never prevent the API server
+    from starting.
+    """
+    try:
+        from airflow._shared.observability.metrics import stats
+        from airflow.observability.metrics import stats_utils
+
+        stats.initialize(
+            factory=stats_utils.get_stats_factory(),
+            export_legacy_names=conf.getboolean("metrics", "legacy_names_on"),
+        )
+    except Exception:
+        log.warning(
+            "Failed to initialize API server Stats in the API server; metrics emitted through the "
+            "API server Stats singleton will not be recorded.",
+            exc_info=True,
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _initialize_api_server_stats()
     async with AsyncExitStack() as stack:
         for route in app.routes:
             if isinstance(route, Mount) and isinstance(route.app, FastAPI):
@@ -104,7 +128,6 @@ def create_app(apps: str = "all") -> FastAPI:
     if "all" in apps_list or "execution" in apps_list:
         task_exec_api_app = create_task_execution_api_app()
         task_exec_api_app.state.dag_bag = dag_bag
-        init_error_handlers(task_exec_api_app)
         app.mount("/execution", task_exec_api_app)
 
     if "all" in apps_list or "core" in apps_list:
